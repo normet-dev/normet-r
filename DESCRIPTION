@@ -1,0 +1,42 @@
+Package: normet
+Type: Package
+Title: Normalisation, Decomposition, and Counterfactual Modelling for Environmental Time-series
+Version: 0.0.1
+Authors@R: person("Congbo", "Song", email = "congbo.song@manchester.ac.uk", role = c("aut", "cre"),
+                  comment = c(ORCID = "[0000-0001-7948-4834]"))
+Maintainer: Congbo Song <congbo.song@manchester.ac.uk>
+Description: Provides a suite of tools for advanced environmental time series analysis.
+    Core functionalities include meteorological normalisation (de-weathering)
+    to reveal underlying trends in data like air pollution concentrations,
+    and causal inference using both classic and machine learning-based
+    Synthetic Control Methods (SCM). The package features high-level workflows
+    for uncertainty quantification, time-series decomposition, and robust
+    placebo tests, all powered by a high-performance H2O AutoML backend.
+License: GPL-3 | file LICENSE
+Encoding: UTF-8
+LazyData: true
+RoxygenNote: 7.3.3
+URL: https://github.com/normet-dev/normet-r
+BugReports: https://github.com/normet-dev/normet-r/issues
+Imports:
+    data.table,
+    dplyr,
+    doSNOW,
+    foreach,
+    glmnet,
+    h2o,
+    lgr,
+    lubridate,
+    parallel,
+    purrr,
+    quadprog,
+    tibble,
+    tidyr,
+    ggplot2,
+    magrittr,
+    tidyselect
+Suggests:
+    devtools,
+    progress
+Depends:
+    R (>= 4.0)

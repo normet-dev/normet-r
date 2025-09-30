@@ -1,0 +1,398 @@
+
+
+```{r}
+rm(list = ls())
+```
+
+
+```{r}
+source("../R/nm_backend_h2o.r")
+source("../R/nm_causal_bands.r")
+source("../R/nm_causal_placebo.r")
+source("../R/nm_causal_scm.r")
+source("../R/nm_model_io.r")
+source("../R/nm_model_pdp.r")
+source("../R/nm_model_predict.r")
+source("../R/nm_model_train.r")
+source("../R/nm_norm_decom.r")
+source("../R/nm_norm_normalise.r")
+source("../R/nm_norm_rolling.r")
+source("../R/nm_pipeline_do_all.r")
+source("../R/nm_pipeline_workflow.r")
+source("../R/nm_utils_features.r")
+source("../R/nm_utils_logging.r")
+source("../R/nm_utils_metrics.r")
+source("../R/nm_utils_prepare.r")
+source("../R/nm_utils_require.r")
+```
+
+```{r}
+library(readr)
+library(readxl)
+```
+
+```{r}
+Sys.setenv(no_proxy ="localhost,127.0.0.1")
+```
+
+
+```{r}
+nm_init_h2o()
+```
+
+
+```{r}
+
+#data <- read_csv("London_Marylebone_Roadside_MET_fillna.csv", col_types = cols(
+#  date = col_datetime(format = "%Y-%m-%d %H:%M:%S")
+#))
+df <- read_csv("data_MY1_data.csv")
+```
+
+
+```{r}
+library(dplyr)
+df_prep <- nm_prepare_data(df, value='PM2.5',feature_names=c('u10', 'v10', 'd2m', 't2m','blh', 'sp', 'ssrd', 'tcc', 'tp', 'rh2m'), split_method='random',  fraction=0.75, seed=7654321)
+```
+
+```{r}
+#df_prep <- head(df_prep, 10000)
+```
+
+```{r}
+write.csv(df_prep, 'data_df_prep.csv', row.names = FALSE)
+```
+
+
+```{r}
+
+target <- 'value'
+features <- c('u10', 'v10', 'd2m', 't2m',
+              'blh', 'sp', 'ssrd', 'tcc', 'tp', 'rh2m',
+              'date_unix', 'day_julian', 'weekday', 'hour')
+
+
+h2o_quick_cfg <- list(
+  max_models = 8,
+  include_algos = c("GBM"), 
+  sort_metric = "RMSE",
+  max_mem_size = "8G",
+  save_model = TRUE,
+  folder_path = '.',
+  filename = "automl"
+)
+
+
+model_h2o <- nm_train_model(
+  df = df_prep,
+  value = target,
+  backend = "h2o",
+  variables = features,
+  model_config = h2o_quick_cfg,
+  seed = 42,
+  verbose = FALSE
+)
+```
+
+```{r}
+model_h2o
+```
+
+
+```{r}
+nm_save_model(model_h2o, path = './', filename = 'automl')
+```
+
+
+```{r}
+model_h2o<-nm_load_model(path = './', filename = 'automl')
+```
+
+
+```{r}
+modStat = nm_modStats(df_prep, model_h2o)
+```
+
+```{r}
+modStat
+```
+
+```{r}
+pdp_value=nm_pdp(df_prep,model_h2o)
+```
+
+```{r}
+pdp_value2=nm_pdp(df_prep,model_h2o,var_list=c('blh','rh2m'))
+```
+
+
+```{r}
+library(dplyr)
+library(doParallel)
+df_dew=nm_normalise(df_prep, model_h2o,
+                           feature_names=c('u10', 'v10', 'd2m', 't2m',
+       'blh', 'sp', 'ssrd', 'tcc', 'tp', 'rh2m','date_unix', 'day_julian', 'weekday',
+       'hour'), #features used for model training
+                          variables_resample= c('u10', 'v10', 'd2m', 't2m',
+       'blh', 'sp', 'ssrd', 'tcc', 'tp', 'rh2m'), #variables for resampling
+                          n_samples=300,memory_save = TRUE, aggregate=FALSE)
+```
+
+```{r}
+weather_df <- df_prep %>%
+  dplyr::slice(1:100) %>%
+  dplyr::select(u10, v10, d2m, t2m, blh, sp, ssrd, tcc, tp, rh2m)
+```
+
+
+```{r}
+
+df_dew_a=nm_normalise(df_prep, model_h2o,weather_df=weather_df,
+                           feature_names=c('u10', 'v10', 'd2m', 't2m',
+       'blh', 'sp', 'ssrd', 'tcc', 'tp', 'rh2m','date_unix', 'day_julian', 'weekday',
+       'hour'), #features used for model training
+                          variables_resample= c('u10', 'v10', 'd2m', 't2m',
+       'blh', 'sp', 'ssrd', 'tcc', 'tp', 'rh2m'), #variables for resampling
+                          n_samples=300,memory_save = FALSE, aggregate=FALSE)
+```
+
+
+```{r}
+df_dew_rolling=nm_rolling(df_prep,value='value', model=model_h2o,feature_names=c('u10', 'v10', 'd2m', 't2m',
+       'blh', 'sp', 'ssrd', 'tcc', 'tp', 'rh2m','date_unix', 'day_julian', 'weekday',
+       'hour'), #features used for model training
+                          variables_resample= c('u10', 'v10', 'd2m', 't2m',
+       'blh', 'sp', 'ssrd', 'tcc', 'tp', 'rh2m'), 
+                    n_samples=100,window_days=14, rolling_every=7)
+```
+
+
+
+
+```{r}
+# First, call the function and store the resulting list in a single variable
+results <- nm_do_all(
+  df,
+  value = "PM2.5",
+  feature_names = c(
+    "u10", "v10", "d2m", "t2m", "blh", "sp", "ssrd", "tcc", "tp", "rh2m",
+    "date_unix", "day_julian", "weekday", "hour"
+  ),
+  variables_resample = c("u10", "v10", "d2m", "t2m", "blh", "sp", "ssrd", "tcc", "tp", "rh2m"),
+  n_samples = 300
+)
+
+# Then, extract the components from the list into separate variables
+df_dew <- results$out
+model_h2o <- results$model
+df_prep <- results$df_prep
+```
+
+
+
+```{r}
+df_emi <- nm_decompose(method="emission",
+  df = df_prep,
+  value = "value",
+  model = model_h2o,
+  feature_names = c(
+    "u10", "v10", "d2m", "t2m", "blh", "sp", "ssrd", "tcc", "tp", "rh2m",
+    "date_unix", "day_julian", "weekday", "hour"
+  ),
+  n_samples = 300
+)
+```
+
+
+
+```{r}
+df_met <- nm_decompose(method="meteorology",
+  df = df_prep,
+  value = "value",
+  model = model_h2o,
+  feature_names = c(
+    "u10", "v10", "d2m", "t2m", "blh", "sp", "ssrd", "tcc", "tp", "rh2m",
+    "date_unix", "day_julian", "weekday", "hour"
+  ),
+  n_samples = 300)
+```
+
+
+```{r}
+unc_result=nm_do_all_unc(df,value='PM2.5',feature_names=c('u10', 'v10', 'd2m', 't2m',
+       'blh', 'sp', 'ssrd', 'tcc', 'tp', 'rh2m','date_unix', 'day_julian', 'weekday',
+       'hour'),variables_resample=c('u10', 'v10', 'd2m', 't2m',
+       'blh', 'sp', 'ssrd', 'tcc', 'tp', 'rh2m'),n_samples=100,n_models=5)
+```
+
+
+
+
+```{r}
+# 1. Load the required libraries (tidyverse includes both readr and dplyr)
+library(tidyverse)
+
+# 2. Read the CSV file and filter by date
+# read_csv automatically parses date columns. We then filter the date range.
+df <- read_csv('data_AQ_Weekly.csv') %>%
+  filter(date >= as.Date('2015-05-01') & date < as.Date('2016-04-30'))
+
+# 3. Define the control pool as a character vector
+control_pool <- c(
+  "Dongguan", "Zhongshan", "Foshan", "Beihai", "Nanning", "Nanchang", "Xiamen", 
+  "Taizhou", "Ningbo", "Guangzhou", "Huizhou", "Hangzhou", "Liuzhou", 
+  "Shantou", "Jiangmen", "Heyuan", "Quanzhou", "Haikou", "Shenzhen", 
+  "Wenzhou", "Huzhou", "Zhuhai", "Fuzhou", "Shaoxing", "Zhaoqing", 
+  "Zhoushan", "Quzhou", "Jinhua", "Shaoguan", "Sanya", "Jieyang", 
+  "Meizhou", "Shanwei", "Zhanjiang", "Chaozhou", "Maoming", "Yangjiang"
+)
+
+# 4. Filter the data frame to keep only rows where 'ID' is in the combined list
+# The '%in%' operator is the R equivalent of pandas' '.isin()'.
+df <- df %>%
+  filter(ID %in% c(control_pool, "2+26 cities"))
+```
+```{r}
+scm_result=nm_scm(df,date_col="date",outcome_col='SO2wn',unit_col='ID',treated_unit="2+26 cities",donors=control_pool,cutoff_date='2015-10-23')
+```
+
+
+```{r}
+mlscm_result <- nm_mlscm(
+  df = df,
+  date_col = "date",
+  outcome_col = "SO2wn",
+  unit_col = "ID",
+  treated_unit = "2+26 cities",
+  donors = control_pool,
+  cutoff_date = "2015-10-23"
+)
+
+
+```
+
+```{r}
+library(doSNOW)
+out <- nm_placebo_in_space(
+  df = df,
+  date_col = "date",
+  outcome_col = "SO2wn",
+  unit_col = "ID",
+  treated_unit = "2+26 cities",
+  donors = control_pool,
+  cutoff_date = "2015-10-23",
+  verbose = FALSE
+)
+
+```
+
+```{r}
+bands <- nm_effect_bands_space(
+  out,
+  level = 0.95,
+  method = "quantile"
+)
+
+```
+
+```{r}
+
+bands <- nm_effect_bands_space(
+  out,
+  level = 0.95,
+  method = "quantile"
+)
+nm_plot_effect_with_bands(bands, cutoff_date = "2015-10-23", title = "SCM Effect (95% placebo bands)")
+
+
+```
+
+
+```{r}
+out1 <- nm_uncertainty_bands(
+  df = df,
+  date_col = "date",
+  outcome_col = "SO2wn",
+  unit_col = "ID",
+  treated_unit = "2+26 cities",
+  donors = control_pool,
+  cutoff_date = "2015-10-23",
+  method = "jackknife",
+  verbose=FALSE
+)
+
+```
+
+```{r}
+nm_plot_uncertainty_bands(out1, cutoff_date = "2015-10-23", title = "SCM Effect (95% placebo bands)")
+```
+
+```{r}
+out2 <- nm_uncertainty_bands(
+  df = df,
+  date_col = "date",
+  outcome_col = "SO2wn",
+  unit_col = "ID",
+  treated_unit = "2+26 cities",
+  donors = control_pool,
+  cutoff_date = "2015-10-23",
+  method = "bootstrap",
+  verbose=FALSE
+)
+```
+
+```{r}
+nm_plot_uncertainty_bands(out2, cutoff_date = "2015-10-23", title = "SCM Effect (95% placebo bands)")
+```
+
+
+
+```{r}
+out4 <- nm_placebo_in_space(
+  df = df,
+  date_col = "date",
+  outcome_col = "SO2wn",
+  unit_col = "ID",
+  treated_unit = "2+26 cities",
+  donors = control_pool,
+  cutoff_date = "2015-10-23",
+  scm_backend = "mlscm",
+  verbose = FALSE
+)
+
+```
+
+```{r}
+bands <- nm_effect_bands_space(
+  out4,
+  level = 0.95,
+  method = "quantile"
+)
+nm_plot_effect_with_bands(bands, cutoff_date = "2015-10-23", title = "SCM Effect (95% placebo bands)")
+
+```
+
+```{r}
+library(doSNOW)
+scm_all=nm_scm_all(df,date_col="date",outcome_col='SO2wn',unit_col='ID',donors=control_pool,cutoff_date='2015-10-23')
+```
+
+
+```{r}
+mlscm_all=nm_scm_all(
+  df = df,
+  date_col = "date",
+  unit_col = "ID",
+  outcome_col = "SO2wn",
+  cutoff_date = "2015-10-23",
+  donors = control_pool,
+  scm_backend = "mlscm",
+  verbose = TRUE
+)
+
+```
+
+```{r}
+
+```
+

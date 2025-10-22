@@ -360,11 +360,11 @@ If you use `normet` in your research, please cite it as follows:
 ```bibtex
 @Manual{normet-pkg,
   title = {normet: Normalisation, Decomposition, and Counterfactual Modelling for Environmental Time-series},
-  author = {Chao Song and Other Contributors},
+  author = {Congbo Song and Other Contributors},
   year = {2025},
   note = {R package version 0.0.1},
   organization = {University of Manchester},
-  url = {[https://github.com/normet-dev/normet-r](https://github.com/normet-dev/normet-r)},
+  url = {https://github.com/normet-dev/normet-r},
 }
 ```
 

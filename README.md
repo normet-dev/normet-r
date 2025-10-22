@@ -1,252 +1,383 @@
-# [PackageName]: Normalisation, Decomposition, and Counterfactual Modelling for Environmental Time-series
+# normet: Normalisation, Decomposition, and Counterfactual Modelling for Environmental Time-series
 
 [![CRAN status](https://www.r-pkg.org/badges/version/normet)](https://CRAN.R-project.org/package=normet)
 [![R-CMD-check](https://github.com/normet-dev/normet-r/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/normet-dev/normet-r/actions/workflows/R-CMD-check.yaml)
 
-`[PackageName]` is an R package for **environmental time-series analysis**. It provides a suite of tools for:
-
--   **Meteorological Normalisation** (de-weathering) of pollutant concentrations.
--   **Counterfactual Modelling** using the H2O AutoML backend.
--   **Synthetic Control Methods** (classic SCM and ML-based SCM).
--   **Uncertainty Quantification** via bootstrapping, jackknife, and placebo tests.
--   **Evaluation Metrics** tailored for environmental data.
-
-The package is designed for **air-quality research**, **causal inference**, and **policy evaluation**.
+`normet` is an R package designed for **environmental time-series analysis**. It provides a powerful and user-friendly suite of tools for air quality research, causal inference, and policy evaluation.
 
 ---
 
-## Features
+## ✨ Core Strengths
 
--   High-level pipelines (`nm_do_all`, `nm_run_syn`) for normalisation and synthetic control.
--   Rolling weather normalisation (`nm_rolling`) for short-term trend analysis.
--   Time-series decomposition (`nm_decompose`) to separate emissions-driven and meteorology-driven variability.
--   A powerful, scalable backend using **H2O AutoML**.
--   Placebo-in-space (`nm_placebo_in_space`) and placebo-in-time (`nm_placebo_in_time`) analyses for robustness checks.
--   Bootstrap and jackknife-based uncertainty bands (`nm_uncertainty_bands`).
--   Rich evaluation metrics (`nm_modStats`): RMSE, FAC2, IOA, r, R², etc.
--   Parallel execution (`nm_scm_all`) for large panel datasets.
+* **Automated & Intelligent**: Powered by an **H2O AutoML** backend, it automatically finds the optimal model, eliminating tedious manual tuning.
+* **All-in-One Solution**: Offers high-level functions that cover the entire workflow, from data preprocessing and model training to weather normalisation and counterfactual modelling.
+* **Robust Causal Inference**: Integrates both classic and machine-learning-based Synthetic Control Methods (SCM) and provides multiple uncertainty quantification tools (Bootstrap, Jackknife, Placebo Tests) to ensure reliable conclusions.
+* **Designed for Environmental Science**: Its features are built to address core challenges in air quality research, such as isolating meteorological impacts and evaluating policy effectiveness.
 
 ---
 
-## Installation
+## 🚀 Workflow
 
-You can install the released version of `normet` from CRAN with:
+The core workflow of `normet` is designed to simplify complex analytical steps:
 
-```r
-install.packages("normet")
-```
+1.  **Data Preparation (`nm_prepare_data`)**: Automatically processes time-series data, including imputation, feature engineering (e.g., time-based variables), and dataset splitting.
+2.  **Model Training (`nm_train_model`)**: Trains high-performance machine learning models using H2O AutoML.
+3.  **Analysis & Application**:
+    * **Weather Normalisation (`nm_normalise`)**: Removes the influence of meteorological conditions on pollutant concentrations.
+    * **Time-Series Decomposition (`nm_decompose`)**: Decomposes the series into meteorology-driven and emission-driven components.
+    * **Counterfactual Modelling (`nm_run_scm`)**: Estimates the causal effect of an intervention (e.g., a new policy).
 
-Or, install the development version from GitHub with:
+---
+
+## 🔧 Installation
+
+You can install the stable version of `normet` from CRAN:
+
+Install the latest development version from GitHub:
 
 ```r
 # install.packages("devtools")
-devtools::install_github("[normet-dev/normet-r")
+devtools::install_github("normet-dev/normet-r")
 ```
 
 ### Backend Setup
 
-This package relies on the **H2O** backend, which must be installed separately. H2O requires a Java environment.
+`normet` relies on the **H2O** machine learning platform as its core backend. Please ensure you have Java installed in your environment and then install the `h2o` package:
 
 ```r
 # Install the h2o package from CRAN
 install.packages("h2o")
 ```
 
----
+-----
 
-## Quick Start
+## 💡 Quick Start: One-Shot Weather Normalisation
 
-A quick example using the `nm_do_all` pipeline for meteorological normalisation:
+With the `nm_do_all` function, you can perform a complete weather normalisation workflow in just a few lines of code.
 
 ```r
-library([PackageName])
+library(normet)
+library(dplyr) # For data manipulation
 
-# Enable default logging to see progress
-nm_enable_default_logging()
+# Use the built-in example dataset
+data("MY1")
 
-# Example dataset (must contain a date column, target, and predictors)
-set.seed(123)
-df <- data.frame(
-  date = seq.POSIXt(as.POSIXct("2021-01-01"), by = "hour", length.out = 1000),
-  pm25 = abs(rnorm(1000, 20, 10) + sin(1:1000 / 100) * 10),
-  temp = rnorm(1000, 15, 5),
-  wind = abs(rnorm(1000, 3, 2)),
-  humidity = rnorm(1000, 60, 10)
+# Define the feature variables for the model
+predictors <- c(
+  "u10", "v10", "d2m", "t2m", "blh", "sp", "ssrd", "tcc", "tp", "rh2m","date_unix", "day_julian", "weekday", "hour"
 )
 
-# Run the full pipeline
+features_to_use <- c(
+  "u10", "v10", "d2m", "t2m", "blh", "sp", "ssrd", "tcc", "tp", "rh2m"
+)
+
+# Run the end-to-end pipeline
+# nm_do_all automatically handles data prep, model training, and normalisation
 results <- nm_do_all(
-  df = df,
-  value = "pm25",
-  backend = "h2o",
-  feature_names = c("temp", "wind", "humidity"),
-  n_samples = 100 # Use fewer samples for a quick example
+  df = my1,
+  value = "PM2.5",
+  feature_names = predictors,
+  variables_resample = features_to_use, # Specify met variables to resample to remove their effect
+  n_samples = 100 # Use a small sample size for a quick demo
 )
 
-# The results are a list containing:
-# 1. The normalised (deweathered) time-series
+# View the normalised (deweathered) time-series results
+cat("Normalised (deweathered) time-series:\n")
 print(head(results$out))
 
-# 2. The prepared dataset with splits & time-based features
-print(head(results$df_prep))
-
-# 3. The trained H2O AutoML model object
+# Inspect the trained AutoML model object
+cat("\nTrained H2O AutoML Model:\n")
 print(results$model)
 
-# Evaluate model performance manually
+# Evaluate the model's performance
 stats <- nm_modStats(results$df_prep, results$model)
+cat("\nModel Performance Metrics:\n")
 print(stats)
 ```
 
-The `nm_do_all` pipeline performs three main steps:
-1.  **Data preparation**: Parses the datetime column, validates features, imputes missing values, adds date-based covariates (hour, weekday, etc.), and splits data into training/testing sets.
-2.  **Model training**: Trains a model using H2O AutoML.
-3.  **Normalisation**: Resamples weather covariates and predicts the counterfactual ("deweathered") series.
+The `nm_do_all` function returns a list containing three key elements:
 
----
+1.  `out`: A data frame with the normalised (deweathered) time-series.
+2.  `df_prep`: The preprocessed data, including training/testing splits.
+3.  `model`: The trained H2O AutoML model object.
 
-## Advanced Examples
 
-### Time-Series Decomposition
+### Step-by-Step Execution
 
-Decompose the time series into emissions-driven and meteorology-driven components.
+For more control over the process, you can execute each step manually.
+
+#### 1\. Prepare the Data (`nm_prepare_data`)
+
+This function handles missing value imputation, adds time-based features, and splits the data into training and testing sets.
 
 ```r
-# Decompose to get emissions-driven components
-emi <- nm_decompose(
+df_prep <- nm_prepare_data(
+  df = my1,
+  value = 'PM2.5',
+  feature_names = features_to_use,
+  split_method = 'random',
+  fraction = 0.75
+)
+```
+
+#### 2\. Train the Model (`nm_train_model`)
+
+Train a machine learning model using H2O AutoML. The configuration allows you to control the training process.
+
+```r
+# Define all predictor variables
+target <- 'value'
+
+# Configure H2O AutoML
+h2o_config <- list(
+  max_models = 10,
+  sort_metric = "RMSE",
+  max_mem_size = "8G"
+)
+
+# Train the model
+model <- nm_train_model(
+  df = df_prep,
+  value = target,
+  backend = "h2o",
+  variables = predictors,
+  model_config = h2o_config
+)
+
+# Evaluate model performance
+nm_modStats(df_prep, model)
+```
+
+#### 3\. Perform Normalisation (`nm_normalise`)
+
+Use the trained model to generate the weather-normalised time-series.
+
+```r
+df_normalised <- nm_normalise(
+  df = df_prep,
+  model = model,
+  feature_names = predictors,
+  variables_resample = features_to_use,
+  n_samples = 100
+)
+
+print(head(df_normalised))
+```
+
+#### 4\. Using a Custom Weather Dataset
+
+You can also provide a specific weather dataset via the `weather_df` argument. This is useful for answering questions like, "What would concentrations have been under the average weather conditions of a different year?"
+
+```r
+# For demonstration, create a custom weather dataset using the first 100 rows
+custom_weather <- df_prep %>%
+  slice(1:100) %>%
+  select(all_of(features_to_use))
+
+# Perform normalisation using the custom weather conditions
+df_norm_custom <- nm_normalise(
+  df = df_prep,
+  model = model,
+  weather_df = custom_weather,
+  feature_names = predictors,
+  variables_resample = features_to_use,
+  n_samples = 100 # n_samples will now sample from `custom_weather`
+)
+
+print(head(df_norm_custom))
+```
+
+-----
+
+## 📊 Core Features Showcase
+
+In addition to the high-level pipeline, `normet` offers flexible, modular functions for custom, step-by-step analyses.
+
+### 1\. Weather Normalisation & Time-Series Decomposition
+
+#### Rolling Weather Normalisation (`nm_rolling`)
+
+Ideal for short-term trend analysis, this function performs normalisation within a moving time window to capture dynamic changes.
+
+```r
+# Assuming you have `results$df_prep` and `results$model` from the quick start
+df_dew_rolling <- nm_rolling(
+  df = df_prep,
+  value = 'value',
+  model = model,
+  feature_names = predictors,
+  variables_resample = features_to_use,
+  n_samples = 100,
+  window_days = 14,    # Window size in days
+  rolling_every = 7      # Step size in days
+)
+print(head(df_dew_rolling))
+```
+
+#### Time-Series Decomposition (`nm_decompose`)
+
+Decomposes the original time series into its **emission-driven** and **meteorology-driven** components.
+
+```r
+# Decompose to get the emission-driven component
+df_emi <- nm_decompose(
   method = "emission",
-  df = df,
-  value = "pm25",
-  feature_names = c("temp", "wind", "humidity"),
+  df = df_prep,
+  value = "value",
+  model = model,
+  feature_names = predictors,
   n_samples = 100
 )
-print(head(emi))
+print(head(df_emi))
 
-# Decompose to get meteorology-driven components
-met <- nm_decompose(
+# Decompose to get the meteorology-driven component
+df_met <- nm_decompose(
   method = "meteorology",
-  df = df,
-  value = "pm25",
-  feature_names = c("temp", "wind", "humidity"),
+  df = df_prep,
+  value = "value",
+  model = model,
+  feature_names = predictors,
   n_samples = 100
 )
-print(head(met))
+print(head(df_met))
 ```
 
-### Causal Inference with Synthetic Control
+### 2\. Counterfactual Modelling & Causal Inference
 
-Estimate the effect of an intervention on a single unit.
+`normet` includes a powerful toolkit for Synthetic Control Methods (SCM) to evaluate the causal impact of policies or events.
+
+#### Data Preparation
 
 ```r
-# Create example panel data
-set.seed(456)
-df_panel <- data.frame(
-  date = rep(seq.Date(as.Date("2020-01-01"), by = "day", length.out = 100), 4),
-  city = rep(c("A", "B", "C", "D"), each = 100),
-  pm25 = c(
-    abs(rnorm(100, 20, 5) + c(rep(0, 70), rep(10, 30))), # City A is treated after day 70
-    abs(rnorm(100, 22, 5)), # Donors
-    abs(rnorm(100, 18, 5)),
-    abs(rnorm(100, 25, 5))
-  )
-)
+# Load the SCM example data
+data("SCM")
+df <- scm%>%
+  filter(date >= as.Date('2015-05-01') & date < as.Date('2016-04-30'))
 
-# Run Synthetic Control (SCM)
-syn <- nm_run_syn(
-  df = df_panel,
-  date_col = "date",
-  unit_col = "city",
-  outcome_col = "pm25",
-  treated_unit = "A",
-  cutoff_date = "2020-03-11", # Day 71
-  donors = c("B", "C", "D"),
-  scm_backend = "scm" # 'scm' or 'mlscm'
+# Define the treated unit, donor pool, and intervention date
+treated_unit <- "2+26 cities"
+donor_pool <- c(
+  "Dongguan", "Zhongshan", "Foshan", "Beihai", "Nanning", "Nanchang", "Xiamen",
+  "Taizhou", "Ningbo", "Guangzhou", "Huizhou", "Hangzhou", "Liuzhou",
+  "Shantou", "Jiangmen", "Heyuan", "Quanzhou", "Haikou", "Shenzhen",
+  "Wenzhou", "Huzhou", "Zhuhai", "Fuzhou", "Shaoxing", "Zhaoqing",
+  "Zhoushan", "Quzhou", "Jinhua", "Shaoguan", "Sanya", "Jieyang",
+  "Meizhou", "Shanwei", "Zhanjiang", "Chaozhou", "Maoming", "Yangjiang"
 )
-print(tail(syn)) # Shows observed, synthetic, and effect columns
-
-# Run a Placebo-in-Space test for significance
-placebo <- nm_placebo_in_space(
-  df = df_panel,
-  date_col = "date",
-  unit_col = "city",
-  outcome_col = "pm25",
-  treated_unit = "A",
-  cutoff_date = "2020-03-11"
-)
-print(paste("Placebo P-Value:", round(placebo$p_value, 3)))
+cutoff_date <- as.Date("2015-10-23") # Define the intervention start date
 ```
 
----
-
-## Uncertainty Quantification for Causal Effects
-
-Construct confidence bands for the treatment effect using bootstrap or jackknife methods.
+#### Running a Synthetic Control Analysis (`nm_run_scm`)
 
 ```r
-# Bootstrap version
-boot <- nm_uncertainty_bands(
-  df = df_panel,
+# Run classic SCM or the machine learning-based MLSCM
+scm_result <- nm_run_scm(
+  df = df,
   date_col = "date",
-  unit_col = "city",
-  outcome_col = "pm25",
-  treated_unit = "A",
-  cutoff_date = "2020-03-11",
-  scm_backend = "scm",
+  outcome_col = "SO2wn",
+  unit_col = "ID",
+  treated_unit = treated_unit,
+  donors = donor_pool,
+  cutoff_date = cutoff_date,
+  scm_backend = "scm" # Options: 'scm' or 'mlscm'
+)
+print(tail(scm_result))
+```
+
+#### Placebo Tests (`nm_placebo_in_space`)
+
+Check the significance of the main effect by iteratively treating each control unit as the "treated" unit and running a "fake" intervention.
+
+```r
+placebo_results <- nm_placebo_in_space(
+  df = df,
+  date_col = "date",
+  outcome_col = "SO2wn",
+  unit_col = "ID",
+  treated_unit = treated_unit,
+  donors = donor_pool,
+  cutoff_date = cutoff_date,
+  scm_backend = "scm", Options: 'scm' or 'mlscm'
+  verbose = FALSE
+)
+
+# Calculate confidence bands from the placebo effects
+bands <- nm_effect_bands_space(placebo_results, level = 0.95, method = "quantile")
+
+# Plot the main effect with the placebo bands
+nm_plot_effect_with_bands(bands, cutoff_date = cutoff_date, title = "SCM Effect (95% placebo bands)")
+```
+
+#### Uncertainty Quantification (`nm_uncertainty_bands`)
+
+Generate confidence intervals for the causal effect using **Bootstrap** or **Jackknife** methods.
+
+```r
+# Bootstrap method
+boot_bands <- nm_uncertainty_bands(
+  df = df,
+  date_col = "date",
+  outcome_col = "SO2wn",
+  unit_col = "ID",
+  treated_unit = treated_unit,
+  donors = donor_pool,
+  cutoff_date = cutoff_date,
+  scm_backend = "scm", Options: 'scm' or 'mlscm'
   method = "bootstrap",
-  B = 50 # Use a small number of replications for example
+  B = 50 # Use a small number of replications for a quick demo
 )
-# This returns a list with the main effect ('treated') and bounds ('low', 'high')
+nm_plot_uncertainty_bands(boot_bands, cutoff_date = cutoff_date)
 
-# Plot the results
-nm_plot_uncertainty_bands(boot, cutoff_date = "2020-03-11")
-
-# Jackknife version (leave-one-donor-out)
-jack <- nm_uncertainty_bands(
-  df = df_panel,
+# Jackknife (leave-one-out) method
+jack_bands <- nm_uncertainty_bands(
+  df = df,
   date_col = "date",
-  unit_col = "city",
-  outcome_col = "pm25",
-  treated_unit = "A",
-  cutoff_date = "2020-03-11",
+  outcome_col = "SO2wn",
+  unit_col = "ID",
+  treated_unit = treated_unit,
+  donors = donor_pool,
+  cutoff_date = cutoff_date,
   scm_backend = "scm",
-  method = "jackknife",
-  ci_level = 0.95
+  method = "jackknife"
 )
-nm_plot_uncertainty_bands(jack, cutoff_date = "2020-03-11")
-
+nm_plot_uncertainty_bands(jack_bands, cutoff_date = cutoff_date)
 ```
 
----
+-----
 
-## Dependencies
+## 📦 Dependencies
 
--   R >= 4.0
--   **Main Dependencies**: `h2o`, `dplyr`, `data.table`, `lubridate`, `foreach`, `doSNOW`, `glmnet`, `quadprog`
--   **Suggested**: `lgr`, `progress`
+  * R (\>= 4.0)
+  * **Core Dependencies**: `h2o`, `dplyr`, `data.table`, `lubridate`, `foreach`, `doSNOW`, `glmnet`, `quadprog`
+  * **Suggested**: `lgr`, `progress`
 
----
+-----
 
-## Citation
+## 📜 How to Cite
 
-If you use `normet` in your research, please cite:
+If you use `normet` in your research, please cite it as follows:
 
+```bibtex
+@Manual{normet-pkg,
+  title = {normet: Normalisation, Decomposition, and Counterfactual Modelling for Environmental Time-series},
+  author = {Chao Song and Other Contributors},
+  year = {2025},
+  note = {R package version 0.0.1},
+  organization = {University of Manchester},
+  url = {[https://github.com/normet-dev/normet-r](https://github.com/normet-dev/normet-r)},
+}
 ```
-Song, C. Other (2025).
-normet: Normalisation, Decomposition, and Counterfactual Modelling for Environmental Time-series.
-University of Manchester. R package version [X.Y.Z].
-[https://github.com/](https://github.com/)normet-dev/normet-r
-```
 
----
+-----
 
-## License
+## 📄 License
 
-This project is licensed under the MIT License.
+This project is licensed under the **GNU GENERAL PUBLIC LICENSE**.
 
----
+-----
 
-## Contributing
+## 🤝 How to Contribute
 
-Contributions are welcome! Please note that this project is released with a Contributor Code of Conduct. By participating, you agree to abide by its terms.
+Contributions are welcome\! This project is released with a Contributor Code of Conduct. By participating, you agree to abide by its terms.
 
-Please submit bug reports and feature requests via the [GitHub issue tracker](https://github.com/normet-dev/normet-r/issues).
+Please submit bug reports and feature requests via the [GitHub Issues](https://github.com/normet-dev/normet-r/issues).

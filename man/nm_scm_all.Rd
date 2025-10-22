@@ -14,6 +14,7 @@ nm_scm_all(
   scm_backend = "scm",
   n_cores = NULL,
   verbose = TRUE,
+  cleanup_every = 5,
   ...
 )
 }
@@ -39,6 +40,8 @@ cores minus one.}
 \item{verbose}{Logical; whether to print INFO/WARN log messages.
 Default is TRUE. Progress bar is always shown regardless of this flag.}
 
+\item{cleanup_every}{Integer; how often to clear H2O memory (only relevant if mlscm+h2o).}
+
 \item{...}{Additional arguments passed to the backend functions.}
 }
 \value{
@@ -49,5 +52,5 @@ A single, long-format data frame containing the combined results
 Applies a synthetic control method to every unit in a dataset,
 treating each one as the target unit in turn. Uses parallel execution
 for the classic SCM backend, and serial execution for ML-SCM to avoid
-conflicts with H2O clusters.
+conflicts with H2O clusters. Includes periodic memory cleanup.
 }

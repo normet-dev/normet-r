@@ -2,7 +2,7 @@
 % Please edit documentation in R/nm_causal_placebo.r
 \name{nm_placebo_in_space}
 \alias{nm_placebo_in_space}
-\title{Perform a Placebo-in-Space Analysis}
+\title{Placebo-in-Space Test for Synthetic Control}
 \usage{
 nm_placebo_in_space(
   df,
@@ -15,6 +15,7 @@ nm_placebo_in_space(
   scm_backend = "scm",
   post_agg = "mean",
   verbose = TRUE,
+  cleanup_every = 10,
   ...
 )
 }
@@ -25,30 +26,35 @@ nm_placebo_in_space(
 
 \item{unit_col}{Name of the unit identifier column.}
 
-\item{outcome_col}{Name of the outcome column.}
+\item{outcome_col}{Name of the outcome variable column.}
 
 \item{treated_unit}{The treated unit identifier.}
 
 \item{cutoff_date}{The intervention cutoff date.}
 
-\item{donors}{Optional vector of donor units.}
+\item{donors}{Optional vector of donor units. If NULL, all units except the treated are used.}
 
-\item{scm_backend}{SCM backend ("scm" or "mlscm").}
+\item{scm_backend}{Which SCM backend to use: "scm" or "mlscm".}
 
-\item{post_agg}{Aggregation method for post-treatment effect ("mean" or "sum").}
+\item{post_agg}{Aggregation method for post-treatment effect: "mean" or "sum".}
 
-\item{verbose}{Whether to print log messages (INFO/WARN). Default TRUE.}
+\item{verbose}{Logical; whether to print log messages.}
 
-\item{...}{Arguments forwarded to `nm_run_scm()`.}
+\item{cleanup_every}{Integer; how often to clear H2O memory (only relevant if scm_backend = "mlscm").}
+
+\item{...}{Additional arguments passed to `nm_run_scm`.}
 }
 \value{
 A list with:
-  - treated: data.frame with observed/synthetic/effect for true treated unit
-  - placebos: list of placebo effect series
-  - p_value: placebo-based significance estimate
-  - ref_band: reference band (p10, p90, mean, std) across placebo effects
+\describe{
+  \item{treated}{Data frame with the treated unit's effect path.}
+  \item{placebos}{List of placebo effect paths for each donor unit.}
+  \item{p_value}{Randomization inference p-value.}
+  \item{ref_band}{Data frame with reference bands (quantiles, mean, sd).}
+}
 }
 \description{
-`nm_placebo_in_space` tests the significance of a treatment effect by iteratively
-applying the synthetic control method to each donor unit.
+Runs placebo-in-space tests by iteratively treating each donor unit as if it
+were the treated unit. This helps assess the significance of the observed
+treatment effect by comparing it against a distribution of placebo effects.
 }

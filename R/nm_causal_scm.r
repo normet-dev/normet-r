@@ -424,7 +424,7 @@ nm_run_scm <- function(df,
 #' Applies a synthetic control method to every unit in a dataset,
 #' treating each one as the target unit in turn. Uses parallel execution
 #' for the classic SCM backend, and serial execution for ML-SCM to avoid
-#' conflicts with H2O clusters.
+#' conflicts with H2O clusters. Includes periodic memory cleanup.
 #'
 #' @param df A long-format panel data frame.
 #' @param date_col The name of the date column.
@@ -438,6 +438,7 @@ nm_run_scm <- function(df,
 #'   cores minus one.
 #' @param verbose Logical; whether to print INFO/WARN log messages.
 #'   Default is TRUE. Progress bar is always shown regardless of this flag.
+#' @param cleanup_every Integer; how often to clear H2O memory (only relevant if mlscm+h2o).
 #' @param ... Additional arguments passed to the backend functions.
 #'
 #' @return A single, long-format data frame containing the combined results
@@ -452,46 +453,48 @@ nm_scm_all <- function(df,
                        scm_backend = "scm",
                        n_cores = NULL,
                        verbose = TRUE,
+                       cleanup_every = 5,
                        ...) {
 
-  log <- nm_get_logger("causal.scm.all") #
+  log <- nm_get_logger("causal.scm.all")
 
   # --- 1. Setup ---
-  units <- sort(unique(df[[unit_col]])) #
-  n_cores <- n_cores %||% (parallel::detectCores() - 1) #
-  n_cores <- max(1, n_cores) #
-  extra_args <- list(...) #
-  ml_backend_for_log <- if (scm_backend == "mlscm") extra_args$backend %||% "h2o" else NA #
+  units <- sort(unique(df[[unit_col]]))
+  n_cores <- n_cores %||% (parallel::detectCores() - 1)
+  n_cores <- max(1, n_cores)
+  extra_args <- list(...)
+  ml_backend_for_log <- if (scm_backend == "mlscm") extra_args$backend %||% "h2o" else NA
 
   if (verbose) {
     log$info(
       "scm_all: scm_backend=%s | ml_backend=%s | cutoff=%s | units=%d | n_cores=%d",
       scm_backend, ml_backend_for_log, cutoff_date, length(units), n_cores
-    ) #
+    )
   }
 
-  # Initialize H2O once at the beginning if using the mlscm backend
+  # Initialize H2O once if using mlscm+h2o
   if (tolower(scm_backend) == "mlscm" && (extra_args$backend %||% "h2o") == "h2o") {
-      nm_init_h2o(verbose = verbose) #
+    nm_init_h2o(verbose = verbose)
   }
 
-  # --- 2. Progress bar (always shown) ---
+  # --- 2. Progress bar ---
   if (!requireNamespace("progress", quietly = TRUE)) {
-    stop("Package 'progress' is required for progress bar. Please install it.") #
+    stop("Package 'progress' is required for progress bar. Please install it.")
   }
   pb <- progress::progress_bar$new(
     format = "  SCM-all [:bar] :percent | Elapsed: :elapsed | ETA: :eta",
     total = length(units), clear = FALSE, width = 80
-  ) #
+  )
 
-  results <- list() #
+  results <- list()
 
   # --- 3. Execution mode ---
   if (tolower(scm_backend) == "scm") {
-    cl <- parallel::makeCluster(n_cores) #
-    doSNOW::registerDoSNOW(cl) #
+    # Parallel execution for classic SCM
+    cl <- parallel::makeCluster(n_cores)
+    doSNOW::registerDoSNOW(cl)
     on.exit(parallel::stopCluster(cl), add = TRUE)
-    opts <- list(progress = function(n) pb$tick()) #
+    opts <- list(progress = function(n) pb$tick())
 
     pieces <- foreach::foreach(
       code = units,
@@ -510,53 +513,58 @@ nm_scm_all <- function(df,
             scm_backend = scm_backend, verbose = FALSE
           ),
           extra_args
-        ) #
-
-        syn <- do.call(nm_run_scm, run_args) #
-
-        syn[[unit_col]] <- code #
-        syn <- syn %>% dplyr::rename(!!date_col := date) #
-        return(syn) #
-
+        )
+        syn <- do.call(nm_run_scm, run_args)
+        syn[[unit_col]] <- code
+        syn <- syn %>% dplyr::rename(!!date_col := date)
+        return(syn)
       }, error = function(e) {
         warning(sprintf("SCM run failed for unit %s: %s", code, e$message))
-        return(NULL) #
+        return(NULL)
       })
     }
-    results <- pieces #
+    results <- pieces
 
   } else if (tolower(scm_backend) == "mlscm") {
     # Serial execution for ML-SCM
+    counter <- 0
     for (code in units) {
-      pb$tick() #
+      pb$tick()
       tryCatch({
         syn <- nm_run_scm(
           df = df, date_col = date_col, outcome_col = outcome_col, unit_col = unit_col,
           treated_unit = code, cutoff_date = cutoff_date, donors = donors,
           scm_backend = scm_backend, verbose = FALSE, ...
-        ) #
-        syn[[unit_col]] <- code #
-        syn <- syn %>% dplyr::rename(!!date_col := date) #
-        results[[length(results) + 1]] <- syn #
+        )
+        syn[[unit_col]] <- code
+        syn <- syn %>% dplyr::rename(!!date_col := date)
+        results[[length(results) + 1]] <- syn
       }, error = function(e) {
-        if (verbose) warning(sprintf("ML-SCM run failed for unit %s: %s", code, e$message)) #
+        if (verbose) warning(sprintf("ML-SCM run failed for unit %s: %s", code, e$message))
       })
 
-      if ((extra_args$backend %||% "h2o") == "h2o") {
-        h2o.removeAll() #
-        gc() #
+      counter <- counter + 1
+      # Periodic cleanup to avoid H2O memory overflow
+      if ((extra_args$backend %||% "h2o") == "h2o" && counter %% cleanup_every == 0) {
+        h2o::h2o.removeAll()
+        gc(verbose = FALSE)
       }
     }
+    # Final cleanup
+    if ((extra_args$backend %||% "h2o") == "h2o") {
+      h2o::h2o.removeAll()
+      gc(verbose = FALSE)
+    }
   } else {
-    stop("Unsupported scm_backend: ", scm_backend) #
+    stop("Unsupported scm_backend: ", scm_backend)
   }
 
   # --- 4. Aggregate Results ---
-  results <- Filter(Negate(is.null), results) #
+  results <- Filter(Negate(is.null), results)
   if (length(results) == 0) {
-    log$error("All synthetic control runs failed.") #
-    stop("All synthetic control runs failed.") #
+    log$error("All synthetic control runs failed.")
+    stop("All synthetic control runs failed.")
   }
 
-  return(dplyr::bind_rows(results)) #
+  return(dplyr::bind_rows(results))
 }

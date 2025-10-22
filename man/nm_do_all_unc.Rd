@@ -20,7 +20,8 @@ nm_do_all_unc(
   n_cores = NULL,
   memory_save = FALSE,
   verbose = TRUE,
-  weighted_method = "r2"
+  weighted_method = "r2",
+  cleanup_every = 5
 )
 }
 \arguments{
@@ -55,11 +56,13 @@ nm_do_all_unc(
 \item{verbose}{Should the function print progress messages and logs?}
 
 \item{weighted_method}{Method for weighting models ("r2" or "rmse").}
+
+\item{cleanup_every}{Integer; how often to clear H2O memory (only relevant if backend = "h2o").}
 }
 \value{
 A list containing the normalised data with uncertainty and model statistics.
 }
 \description{
-This function trains multiple models to aggregate their normalised predictions
-and build uncertainty bands.
+Trains multiple models, aggregates their normalised predictions,
+and builds uncertainty bands with optional performance-based weighting.
 }

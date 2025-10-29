@@ -68,8 +68,8 @@ nm_decompose <- function(method = "emission",
                          df = NULL,
                          model = NULL,
                          value = 'value',
-                         backend = 'h2o',
                          feature_names = NULL,
+                         backend = NULL,
                          split_method = 'random',
                          fraction = 0.75,
                          model_config = NULL,
@@ -80,26 +80,35 @@ nm_decompose <- function(method = "emission",
                          memory_save = FALSE,
                          verbose = TRUE) {
 
+  # --- 1. Validate Common Inputs ---
+  if (is.null(df) || is.null(value)) stop("`df` and `value` must be provided.")
+  if (is.null(model) && is.null(feature_names)) stop("Either `model` or `feature_names` must be provided.")
+  if (is.null(model) && is.null(backend)) stop("When training a model, `backend` must be specified.")
+
+  # --- 2. Dispatch Based on Method ---
   if (method == "emission") {
     return(nm_decom_emi(
-      df = df, model = model, value = value, backend = backend,
-      feature_names = feature_names, split_method = split_method,
-      fraction = fraction, model_config = model_config, n_samples = n_samples,
-      seed = seed, n_cores = n_cores, memory_save = memory_save,
-      verbose = verbose
-    )) #
-  } else if (method == "meteorology") {
-    return(nm_decom_met(
-      df = df, model = model, value = value, backend = backend,
-      feature_names = feature_names, split_method = split_method,
-      fraction = fraction, model_config = model_config, n_samples = n_samples,
-      seed = seed, importance_ascending = importance_ascending,
+      df = df, model = model, value = value, feature_names = feature_names,
+      backend = backend, split_method = split_method, fraction = fraction,
+      model_config = model_config, n_samples = n_samples, seed = seed,
       n_cores = n_cores, memory_save = memory_save, verbose = verbose
-    )) #
-  } else {
-    stop(paste("Unsupported decomposition method:", method)) #
+    ))
   }
+
+  if (method == "meteorology") {
+    return(nm_decom_met(
+      df = df, model = model, value = value, feature_names = feature_names,
+      backend = backend, split_method = split_method, fraction = fraction,
+      model_config = model_config, n_samples = n_samples, seed = seed,
+      importance_ascending = importance_ascending,
+      n_cores = n_cores, memory_save = memory_save, verbose = verbose
+    ))
+  }
+
+  # --- 3. Unsupported Method ---
+  stop(sprintf("Unsupported decomposition method: '%s'. Use 'emission' or 'meteorology'.", method))
 }
+
 
 
 
@@ -111,7 +120,7 @@ nm_decompose <- function(method = "emission",
 #' @param df Data frame containing the input data.
 #' @param model Pre-trained model for decomposition. If not provided, a model will be trained.
 #' @param value The target variable name as a string.
-#' @param backend The modeling backend to use if a model needs to be trained. Default is 'h2o'.
+#' @param backend The modeling backend to use if a model needs to be trained.
 #' @param feature_names The names of the features used for training and decomposition.
 #' @param split_method Method for splitting data. Default is 'random'.
 #' @param fraction Proportion of data for training. Default is 0.75.
@@ -125,17 +134,21 @@ nm_decompose <- function(method = "emission",
 #' @return The decomposed data frame with columns including `observed`, individual time-based
 #'   contributions, `emi_total`, `emi_noise`, and `emi_base`.
 #'
-nm_decom_emi <- function(df = NULL, model = NULL, value = 'value', backend = 'h2o',
-                         feature_names = NULL, split_method = 'random', fraction = 0.75,
+nm_decom_emi <- function(df = NULL, model = NULL, value = 'value',
+                         feature_names = NULL, backend = NULL,
+                         split_method = 'random', fraction = 0.75,
                          model_config = NULL, n_samples = 300, seed = 7654321,
                          n_cores = NULL, memory_save = FALSE, verbose = TRUE) {
 
   log <- nm_get_logger("analysis.decompose.emissions")
   h2o::h2o.no_progress()
 
-  # --- 1. Robust Data Preparation ---
+  # --- 1. Validate Inputs ---
   if (is.null(df) || is.null(value)) stop("`df` and `value` must be provided.")
+  if (is.null(model) && is.null(feature_names)) stop("Either `model` or `feature_names` must be provided.")
+  if (is.null(model) && is.null(backend)) stop("When training a model, `backend` must be specified.")
 
+  # --- 2. Prepare Data ---
   df_work <- df %>%
     nm_process_date() %>%
     dplyr::filter(!is.na(date) & !is.na(.data[[value]])) %>%
@@ -146,9 +159,8 @@ nm_decom_emi <- function(df = NULL, model = NULL, value = 'value', backend = 'h2
     df_work <- df_work %>% dplyr::rename(value = all_of(value))
   }
 
-  # --- 2. Train Model if not provided ---
+  # --- 3. Train Model if Needed ---
   if (is.null(model)) {
-    if (is.null(feature_names)) stop("When `model` is NULL, you must provide `feature_names` for training.")
     if (verbose) log$info("Training model via backend='%s'...", backend)
     build_results <- nm_build_model(
       df = df_work, value = "value", backend = backend, feature_names = feature_names,
@@ -159,14 +171,14 @@ nm_decom_emi <- function(df = NULL, model = NULL, value = 'value', backend = 'h2
     model <- build_results$model
   }
 
-  # --- 3. Resolve Model Features & Prepare Final Data ---
+  # --- 4. Extract Model Features ---
   model_feats <- tryCatch(nm_extract_features(model), error = function(e) feature_names)
   model_feats <- intersect(model_feats, colnames(df_work))
   if (length(model_feats) == 0) stop("No valid model features found in the provided `df`.")
 
   result <- data.frame(date = df_work$date, observed = df_work$value)
 
-  # --- 4. Iterative Decomposition ---
+  # --- 5. Time-Based Decomposition ---
   time_vars_order <- c("date_unix", "day_julian", "weekday", "hour")
   decomp_vars <- c("base", intersect(time_vars_order, model_feats))
 
@@ -177,13 +189,11 @@ nm_decom_emi <- function(df = NULL, model = NULL, value = 'value', backend = 'h2
     )
   }
 
-  tmp_results <- list() # Store intermediate normalization results
+  tmp_results <- list()
   current_features_to_resample <- model_feats
 
   for (var_to_freeze in decomp_vars) {
     if (verbose) pb$tick()
-
-    # "Freezing" a variable means excluding it from the resampling list
     if (var_to_freeze != "base") {
       current_features_to_resample <- setdiff(current_features_to_resample, var_to_freeze)
     }
@@ -193,15 +203,12 @@ nm_decom_emi <- function(df = NULL, model = NULL, value = 'value', backend = 'h2
       variables_resample = current_features_to_resample, n_samples = n_samples,
       seed = seed, n_cores = n_cores, memory_save = memory_save, verbose = FALSE
     )
-    # Store the aligned normalised series
     tmp_results[[var_to_freeze]] <- dplyr::right_join(df_norm, result["date"], by = "date")$normalised
   }
 
-  # Add intermediate results to the main data frame for calculation
   result <- cbind(result, as.data.frame(tmp_results))
 
-  # --- 5. Recompose Final Components ---
-  # The final, most granular result is the one where the last time variable was frozen
+  # --- 6. Recompose Components ---
   result$emi_total <- result[[decomp_vars[length(decomp_vars)]]] %||% result$observed
 
   recomp_pairs <- list(
@@ -218,8 +225,6 @@ nm_decom_emi <- function(df = NULL, model = NULL, value = 'value', backend = 'h2
   base_mean <- mean(result$base, na.rm = TRUE)
   result$emi_noise <- result$base - base_mean
   result$emi_base <- base_mean
-
-  # Clean up intermediate column
   result$base <- NULL
 
   return(result)
@@ -234,7 +239,7 @@ nm_decom_emi <- function(df = NULL, model = NULL, value = 'value', backend = 'h2
 #' @param df Data frame containing the input data.
 #' @param model Pre-trained model for decomposition. If not provided, a model will be trained.
 #' @param value The target variable name as a string.
-#' @param backend The modeling backend to use if a model needs to be trained. Default is 'h2o'.
+#' @param backend The modeling backend to use if a model needs to be trained.
 #' @param feature_names The names of the features used for training and decomposition.
 #' @param split_method Method for splitting data. Default is 'random'.
 #' @param fraction Proportion of data for training. Default is 0.75.
@@ -249,8 +254,9 @@ nm_decom_emi <- function(df = NULL, model = NULL, value = 'value', backend = 'h2
 #' @return A data frame with decomposed components including `observed`, `emi_total`, individual
 #'   meteorological contributions, `met_total`, `met_base`, and `met_noise`.
 #'
-nm_decom_met <- function(df = NULL, model = NULL, value = 'value', backend = 'h2o',
-                         feature_names = NULL, split_method = 'random', fraction = 0.75,
+nm_decom_met <- function(df = NULL, model = NULL, value = 'value',
+                         feature_names = NULL, backend = NULL,
+                         split_method = 'random', fraction = 0.75,
                          model_config = NULL, n_samples = 300, seed = 7654321,
                          importance_ascending = FALSE, n_cores = NULL,
                          memory_save = FALSE, verbose = TRUE) {
@@ -258,9 +264,12 @@ nm_decom_met <- function(df = NULL, model = NULL, value = 'value', backend = 'h2
   log <- nm_get_logger("analysis.decompose.met")
   h2o::h2o.no_progress()
 
-  # --- 1. Robust Data Preparation ---
+  # --- 1. Validate Inputs ---
   if (is.null(df) || is.null(value)) stop("`df` and `value` must be provided.")
+  if (is.null(model) && is.null(feature_names)) stop("Either `model` or `feature_names` must be provided.")
+  if (is.null(model) && is.null(backend)) stop("When training a model, `backend` must be specified.")
 
+  # --- 2. Prepare Data ---
   df_work <- df %>%
     nm_process_date() %>%
     dplyr::filter(!is.na(date) & !is.na(.data[[value]])) %>%
@@ -271,9 +280,8 @@ nm_decom_met <- function(df = NULL, model = NULL, value = 'value', backend = 'h2
     df_work <- df_work %>% dplyr::rename(value = all_of(value))
   }
 
-  # --- 2. Train Model if not provided ---
+  # --- 3. Train Model if Needed ---
   if (is.null(model)) {
-    if (is.null(feature_names)) stop("When `model` is NULL, you must provide `feature_names` for training.")
     if (verbose) log$info("Training model via backend='%s'...", backend)
     build_results <- nm_build_model(
       df = df_work, value = "value", backend = backend, feature_names = feature_names,
@@ -284,25 +292,23 @@ nm_decom_met <- function(df = NULL, model = NULL, value = 'value', backend = 'h2
     model <- build_results$model
   }
 
-  # --- 3. Resolve Model Features & Prepare Final Data ---
+  # --- 4. Extract and Filter Features ---
   feat_sorted <- tryCatch(
     nm_extract_features(model, importance_ascending = importance_ascending),
     error = function(e) feature_names
   )
-
   feat_sorted <- intersect(feat_sorted, colnames(df_work))
   if (length(feat_sorted) == 0) stop("No valid model features found in `df`.")
 
-  # Exclude time variables from the meteorological contribution set
   time_vars <- c("hour", "weekday", "day_julian", "date_unix")
   contrib_candidates <- feat_sorted[!feat_sorted %in% time_vars]
 
   result <- data.frame(date = df_work$date, observed = df_work$value)
 
-  # --- 4. Iterative Decomposition ---
+  # --- 5. Iterative Decomposition ---
   decomp_order <- c("emi_total", contrib_candidates)
   resample_vars <- contrib_candidates
-  tmp_results <- list() # Store intermediate normalization results
+  tmp_results <- list()
 
   if (verbose) {
     pb <- progress::progress_bar$new(
@@ -320,26 +326,22 @@ nm_decom_met <- function(df = NULL, model = NULL, value = 'value', backend = 'h2
       seed = seed, n_cores = n_cores, memory_save = memory_save, verbose = FALSE
     )
 
-    # Store the aligned normalised series
     tmp_results[[var_to_freeze]] <- dplyr::right_join(df_norm, result["date"], by = "date")$normalised
 
-    # For the next iteration, freeze the current variable by removing it from the resample list
     if (var_to_freeze != "emi_total") {
       resample_vars <- setdiff(resample_vars, var_to_freeze)
     }
   }
 
-  # --- 5. Recompose Final Components ---
+  # --- 6. Recompose Meteorological Components ---
   result$emi_total <- tmp_results[["emi_total"]]
 
-  # Per-feature contributions are the chained differences
   prev_key <- "emi_total"
   for (feat in contrib_candidates) {
     result[[feat]] <- tmp_results[[feat]] - tmp_results[[prev_key]]
     prev_key <- feat
   }
 
-  # Calculate final meteorological components
   result$met_total <- result$observed - result$emi_total
   result$met_base <- mean(result$met_total, na.rm = TRUE)
 
